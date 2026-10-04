@@ -15,7 +15,14 @@ import (
 )
 
 // checkSkillsInventoryDrift repairs ox-managed skill files that no longer match
-// the catalog compiled into the running binary.
+// the catalog Plan projects — the one compiled into the running binary, unioned
+// with the approved skills in this repo's team context.
+//
+// Since team skills joined that catalog it is also the anti-entropy FLOOR under
+// team content: the daemon reconciles promptly off the team-context pull that
+// noticed an edit (SyncScheduler.reconcileTeamSkills), and this slow tick catches
+// what that path cannot see — a sparse refresh that materializes agents/ without
+// moving HEAD, or an edit that landed while this daemon was down.
 //
 // It is the counterpart to the cheap staleness compare `ox agent prime` performs.
 // Prime deliberately does no work when the recorded revision matches, because it
@@ -49,7 +56,7 @@ func checkSkillsInventoryDrift(ctx context.Context, repoPath string) CheckResult
 	// A LIVE recording session is reading these files right now. Merely finding
 	// a state file is insufficient: crashed sessions leave .recording.json behind,
 	// and treating that tombstone as live disables this repair forever.
-	recording, recordingErr := hasLiveRecording(repoPath)
+	recording, recordingErr := session.HasLiveRecording(repoPath)
 	if recordingErr != nil {
 		res.Summary = "skipped: could not inspect recording sessions"
 		return res
@@ -150,19 +157,6 @@ func checkSkillsInventoryDrift(ctx context.Context, repoPath string) CheckResult
 	res.Status = StatusFixed
 	res.Summary = fmt.Sprintf("reconciled %d ox-managed skill file(s)", changed)
 	return res
-}
-
-func hasLiveRecording(repoPath string) (bool, error) {
-	states, err := session.LoadAllRecordingStates(repoPath)
-	if err != nil {
-		return false, err
-	}
-	for _, state := range states {
-		if state.IsAgentAlive() {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // trackedPlanPaths returns the planned paths that git currently tracks.

@@ -260,6 +260,31 @@ func anchorPattern(p string) string {
 // nothing to read and the checkout can never recover on its own. Clone and
 // doctor-repair both need this guarantee, so it lives here rather than being
 // re-implemented at each call site.
+// SparseSetFor computes the complete sparse-checkout set for a repo of this
+// kind: the manifest's own includes, plus the .sageox floor, plus the
+// directories ox itself must be able to read.
+//
+// This exists because the three steps were previously open-coded at each call
+// site, and one of them — the daemon's every-tick re-apply — only ever did the
+// first. The result was that `agents/` was materialized at clone and then
+// deleted by the next sync tick, taking every team rule and team skill with it,
+// silently, on any team whose server manifest omitted the directory. Clone and
+// doctor happened to remember the floor; the recurring path did not, and the
+// recurring path is the one that runs forever.
+//
+// Anything that is about to run `git sparse-checkout set` MUST come through
+// here. A caller that computes its own set can forget the floor again, and the
+// failure is invisible: an un-materialized directory and an empty one are the
+// same value on disk.
+func SparseSetFor(cfg *ManifestConfig, kind RepoKind) []string {
+	paths := ComputeSparseSet(cfg)
+	if len(paths) == 0 {
+		return nil
+	}
+	paths = EnsureSageoxInclude(paths)
+	return EnsureRequiredIncludes(paths, kind, DenyPaths(cfg))
+}
+
 func EnsureSageoxInclude(paths []string) []string {
 	for _, p := range paths {
 		switch p {
@@ -284,6 +309,17 @@ func EnsureSageoxInclude(paths []string) []string {
 // same value, which is why it went unnoticed. The client fallback include set
 // lists agents/, but the TRACKED manifest wins whenever one exists.
 var requiredTeamContextDirs = []string{"agents/"}
+
+// RequiredIncludes returns the directories SparseSetFor floors into the sparse
+// set for repos of this kind, whatever the manifest lists. Exported so doctor
+// can tell "the manifest omits this but our own repair materializes it anyway"
+// apart from "only the server can fix this" — the two need opposite advice.
+func RequiredIncludes(kind RepoKind) []string {
+	if kind != RepoKindTeamContext {
+		return nil
+	}
+	return append([]string(nil), requiredTeamContextDirs...)
+}
 
 // EnsureRequiredIncludes floors the sparse set with the directories ox needs for
 // this repo kind, whatever the server-generated manifest happens to list.
