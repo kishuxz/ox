@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **ox no longer hangs on Windows when its input is redirected** — choosing the light or dark markdown theme asks the terminal for its background color, and on Windows that query opens the console directly whenever stdin isn't already a console: a pipe, a file, `NUL`, or Git Bash. The reply could never be interrupted, so the query's own two-second timeout never fired and the command waited forever instead of falling back to dark — `ox guide` and `ox doctor` from Git Bash, any AI coworker capturing ox's output, and two packages of the Windows test suite, which died at the Go test timeout with the read still parked in `ReadConsole`. The query is now only made when stdin really is the console, which is the only case where it can be interrupted and time out.
 - **Plan review answers reach your team, and you can see when they have** — the review page now says "synced to your team" or "saved on the author's machine, not yet synced" instead of assuming success. A review that couldn't be pushed is retried automatically the next time an AI coworker session starts.
 - **Review answers are no longer lost or doubled** — resubmitting after a reload or a double-click sends the same round once. Two open tabs keep each other's unsent marks. Applying the same exported review twice is a no-op.
 - **Resolved review items stay resolved across machines** — each resolution is saved as its own file, so syncing two machines can no longer drop one.

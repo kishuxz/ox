@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -186,8 +187,17 @@ func checkGitRepoState() checkResult {
 		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 		hasUnstaged := false
 		count := 0
+		var perMachine []string
 		for _, line := range lines {
 			if line == "" {
+				continue
+			}
+			// a staged deletion falls through: committing it is how the file leaves the repo
+			if path, ok := perMachineStatusPath(line); ok && line[0] != 'D' {
+				// untracked waits on the .gitignore check; anything else is in the index and must come out
+				if line[:2] != "??" {
+					perMachine = append(perMachine, path)
+				}
 				continue
 			}
 			count++
@@ -195,6 +205,11 @@ func checkGitRepoState() checkResult {
 			if len(line) >= 2 && line[1] != ' ' {
 				hasUnstaged = true
 			}
+		}
+		if len(perMachine) > 0 {
+			return WarningCheck("Repo state",
+				fmt.Sprintf("%d per-machine file(s) in the index under .sageox/", len(perMachine)),
+				"Do not commit these; unstage with 'git rm --cached "+strings.Join(perMachine, " ")+"'")
 		}
 		if count > 0 {
 			if hasUnstaged {
@@ -210,6 +225,22 @@ func checkGitRepoState() checkResult {
 	}
 
 	return PassedCheck("Repo state", "committed and up to date")
+}
+
+// perMachineStatusPath returns the path from a `git status --porcelain` line when it names
+// a file ox's own .gitignore excludes: per-machine state, not config to commit (#1062).
+// ox writes these only directly under .sageox/, which also keeps the path in the doctor hint
+// a fixed name rather than arbitrary text from the working tree.
+func perMachineStatusPath(line string) (string, bool) {
+	if len(line) <= 3 {
+		return "", false
+	}
+	path := line[3:]
+	// a staged rename reads "old -> new"; the destination is what sits in the index
+	if _, dest, ok := strings.Cut(path, " -> "); ok {
+		path = dest
+	}
+	return path, filepath.Dir(path) == ".sageox" && slices.Contains(requiredGitignoreEntries, filepath.Base(path))
 }
 
 // checkGitRemotes validates configured git remotes.
